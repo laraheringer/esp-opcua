@@ -38,8 +38,6 @@
 #include <esp_task_wdt.h>
 #include <esp_sntp.h>
 
-#define ENABLE_MDNS
-
 static const char *TAG = "MAIN";
 static const char *TAG_OPC = "OPC UA";
 
@@ -94,7 +92,6 @@ static void opcua_task(void *arg) {
     UA_ServerConfig_setMinimalCustomBuffer(config, 4840, 0, sendBufferSize, recvBufferSize);
 
     const char* appUri = "open62541.esp32.demo";
-    #ifdef ENABLE_MDNS
     config->mdnsEnabled = true;
     config->mdnsConfig.mdnsServerName = UA_String_fromChars(appUri);
     config->mdnsConfig.serverCapabilitiesSize = 2;
@@ -113,18 +110,9 @@ static void opcua_task(void *arg) {
     } else {
         ESP_LOGI(TAG_OPC, "Could not get default IP Address!");
     }
-    #endif
     UA_ServerConfig_setUriName(config, appUri, "open62541 ESP32 Demo");
 
-    #ifndef CONFIG_ETHERNET_HELPER_CUSTOM_HOSTNAME
-        #ifndef ETHERNET_HELPER_STATIC_IP4
-            #error You need to set a static IP or a custom hostname with menuconfig
-        #else
-        UA_String str = UA_STRING(CONFIG_ETHERNET_HELPER_STATIC_IP4_ADDRESS);
-        #endif
-    #else
-    UA_String str = UA_STRING(CONFIG_ETHERNET_HELPER_CUSTOM_HOSTNAME_STR);
-    #endif
+    UA_String str = UA_STRING(CONFIG_ETHERNET_HELPER_STATIC_IP4_ADDRESS);
     UA_String_clear(&config->customHostname);
     UA_String_copy(&str, &config->customHostname);
 

@@ -1,6 +1,7 @@
 build
-sdkconfig
 sdkconfig.old
+.vscode
+components/open62541/repo
 
 
 # Covers JetBrains IDEs: IntelliJ, RubyMine, PhpStorm, AppCode, PyCharm, CLion, Android Studio and WebStorm
