@@ -14,6 +14,7 @@
 #include <nvs_flash.h>
 
 #include <stdio.h>
+#include <stdlib.h>
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -48,6 +49,57 @@ static bool serverCreated = false;
  * maintains its value when ESP32 wakes from deep sleep.
  */
 RTC_DATA_ATTR static int boot_count = 0;
+
+static void
+updateCountVariable(UA_Server *server) {
+    UA_Int32 count =  rand() % 100;
+    UA_Variant value;
+    UA_Variant_setScalar(&value, &count, &UA_TYPES[UA_TYPES_INT32]);
+    UA_NodeId currentNodeId = UA_NODEID_STRING(1, "count");
+    UA_Server_writeValue(server, currentNodeId, value);
+}
+
+static void
+beforeReadCount(UA_Server *server,
+               const UA_NodeId *sessionId, void *sessionContext,
+               const UA_NodeId *nodeid, void *nodeContext,
+               const UA_NumericRange *range, const UA_DataValue *data) {
+    updateCountVariable(server);
+}
+
+static void
+afterWriteCount(UA_Server *server,
+               const UA_NodeId *sessionId, void *sessionContext,
+               const UA_NodeId *nodeId, void *nodeContext,
+               const UA_NumericRange *range, const UA_DataValue *data) {
+    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                "The variable count was updated");
+}
+
+static void
+addVariables(UA_Server *server) {
+    UA_Int32 count = 0;
+    UA_VariableAttributes attr = UA_VariableAttributes_default;
+    attr.displayName = UA_LOCALIZEDTEXT("en-US", "count - number of turns");
+    attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
+    UA_Variant_setScalar(&attr.value, &count, &UA_TYPES[UA_TYPES_INT32]);
+
+    UA_NodeId currentNodeId = UA_NODEID_STRING(1, "count");
+    UA_QualifiedName currentName = UA_QUALIFIEDNAME(1, "count");
+    UA_NodeId parentNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    UA_NodeId parentReferenceNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES);
+    UA_NodeId variableTypeNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE);
+    UA_Server_addVariableNode(server, currentNodeId, parentNodeId,
+                              parentReferenceNodeId, currentName,
+                              variableTypeNodeId, attr, NULL, NULL);
+
+    UA_ValueCallback callback ;
+    callback.onRead = beforeReadCount;
+    callback.onWrite = afterWriteCount;
+    UA_Server_setVariableNode_valueCallback(server, currentNodeId, callback);
+
+    updateCountVariable(server);
+}
 
 static UA_StatusCode
 UA_ServerConfig_setUriName(UA_ServerConfig *uaServerConfig, const char *uri, const char *name) {
@@ -118,6 +170,8 @@ static void opcua_task(void *arg) {
 
     printf("xPortGetFreeHeapSize before create = %d bytes\n", xPortGetFreeHeapSize());
 
+    addVariables(server);
+
     UA_StatusCode retval = UA_Server_run_startup(server);
     if (retval != UA_STATUSCODE_GOOD) {
         ESP_LOGE(TAG_OPC, "Starting up the server failed with %s", UA_StatusCode_name(retval));
@@ -140,7 +194,7 @@ static void opcua_task(void *arg) {
 static void disconnect_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
 {
-    /* UA_Server *server = *(UA_Server**) arg;
+    /*UA_Server *server = *(UA_Server**) arg;
     if (server) {
         ESP_LOGI(TAG, "Stopping webserver");
         stop_webserver(*server);
@@ -259,10 +313,6 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &connect_handler, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, WIFI_EVENT_STA_DISCONNECTED, &disconnect_handler, NULL));
 #endif // CONFIG_ETHERNET_HELPER_WIFI
-#ifdef CONFIG_ETHERNET_HELPER_ETHERNET
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, &connect_handler, NULL));
-    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ETHERNET_EVENT_DISCONNECTED, &disconnect_handler, NULL));
-#endif // CONFIG_ETHERNET_HELPER_ETHERNET
 
     ESP_LOGI(TAG, "Waiting for wifi connection. OnConnect will start OPC UA...");
 
