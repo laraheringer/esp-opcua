@@ -1,5 +1,5 @@
 
-set(USE_ENCRYPTION OFF)
+set(USE_ENCRYPTION ON)
 
 set(ADDITIONAL_REQUIRES "")
 if (USE_ENCRYPTION)
@@ -28,6 +28,10 @@ set(open62541_OPTIONS
     "-DUA_LOGLEVEL=200"
     "-DUA_ENABLE_NODESET_COMPILER_DESCRIPTIONS=OFF"
     "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
+    "-DMBEDTLS_INCLUDE_DIRS=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\include"
+    "-DMBEDTLS_LIBRARY=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
+    "-DMBEDX509_LIBRARY=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
+    "-DMBEDCRYPTO_LIBRARY=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
 )
 
 
