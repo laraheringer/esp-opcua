@@ -21,6 +21,7 @@
 
 #include "esp_netif.h"
 #include "ethernet_helper.h"
+#include "driver/gpio.h"
 
 #ifdef CONFIG_IDF_TARGET_ESP32
 #define CHIP_NAME "ESP32"
@@ -38,6 +39,8 @@
 
 #include <esp_task_wdt.h>
 #include <esp_sntp.h>
+
+#define LED_GPIO 5
 
 static const char *TAG = "MAIN";
 static const char *TAG_OPC = "OPC UA";
@@ -77,28 +80,125 @@ afterWriteCount(UA_Server *server,
 }
 
 static void
+beforeReadLed(UA_Server *server,
+               const UA_NodeId *sessionId, void *sessionContext,
+               const UA_NodeId *nodeid, void *nodeContext,
+               const UA_NumericRange *range, const UA_DataValue *data) {
+    UA_Boolean level = gpio_get_level(LED_GPIO);
+    UA_Variant value;
+    UA_Variant_setScalar(&value, &level, &UA_TYPES[UA_TYPES_BOOLEAN]);
+    UA_NodeId nodeId = UA_NODEID_STRING(1, "led");
+    UA_Server_writeValue(server, nodeId, value);
+}
+
+static void
+afterWriteLed(UA_Server *server,
+               const UA_NodeId *sessionId, void *sessionContext,
+               const UA_NodeId *nodeId, void *nodeContext,
+               const UA_NumericRange *range, const UA_DataValue *data) {
+    int value = (int)*(UA_Boolean *)(data->value.data);
+    gpio_set_level(LED_GPIO, value);               
+    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                "The variable led was updated to %d - current value = %d", value, gpio_get_level(LED_GPIO));
+}
+
+static void configLed() {
+    gpio_reset_pin(LED_GPIO);
+    gpio_set_direction(LED_GPIO, GPIO_MODE_INPUT_OUTPUT);
+}
+
+static UA_StatusCode
+blink(UA_Server *server,
+           const UA_NodeId *sessionId, void *sessionContext,
+           const UA_NodeId *methodId, void *methodContext,
+           const UA_NodeId *objectId, void *objectContext,
+           size_t inputSize, const UA_Variant *input,
+           size_t outputSize, UA_Variant *output) {
+    int nBlinks = (int)*(UA_Int32 *)input[0].data;
+
+    if (nBlinks > 4) return UA_STATUSCODE_BADINVALIDARGUMENT;
+    for(int i = 0; i < nBlinks; i++) {
+        gpio_set_level(LED_GPIO, 1);       
+        vTaskDelay(700 / portTICK_PERIOD_MS);
+        gpio_set_level(LED_GPIO, 0);       
+        vTaskDelay(700 / portTICK_PERIOD_MS);
+    }
+    return UA_STATUSCODE_GOOD;
+}
+
+static void
 addVariables(UA_Server *server) {
+    //Add variable count
     UA_Int32 count = 0;
     UA_VariableAttributes attr = UA_VariableAttributes_default;
     attr.displayName = UA_LOCALIZEDTEXT("en-US", "count - number of turns");
     attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
     UA_Variant_setScalar(&attr.value, &count, &UA_TYPES[UA_TYPES_INT32]);
 
-    UA_NodeId currentNodeId = UA_NODEID_STRING(1, "count");
-    UA_QualifiedName currentName = UA_QUALIFIEDNAME(1, "count");
+    UA_NodeId nodeId = UA_NODEID_STRING(1, "count");
+    UA_QualifiedName name = UA_QUALIFIEDNAME(1, "count");
     UA_NodeId parentNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
     UA_NodeId parentReferenceNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES);
     UA_NodeId variableTypeNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE);
-    UA_Server_addVariableNode(server, currentNodeId, parentNodeId,
-                              parentReferenceNodeId, currentName,
+    UA_Server_addVariableNode(server, nodeId, parentNodeId,
+                              parentReferenceNodeId, name,
                               variableTypeNodeId, attr, NULL, NULL);
 
-    UA_ValueCallback callback ;
-    callback.onRead = beforeReadCount;
-    callback.onWrite = afterWriteCount;
-    UA_Server_setVariableNode_valueCallback(server, currentNodeId, callback);
+    UA_ValueCallback countCallback;
+    countCallback.onRead = beforeReadCount;
+    countCallback.onWrite = afterWriteCount;
+    UA_Server_setVariableNode_valueCallback(server, nodeId, countCallback);
 
     updateCountVariable(server);
+
+    //Add variable led
+    UA_Boolean led = false;
+    attr.displayName = UA_LOCALIZEDTEXT("en-US", "led");
+    attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
+    UA_Variant_setScalar(&attr.value, &led, &UA_TYPES[UA_TYPES_BOOLEAN]);
+
+    nodeId = UA_NODEID_STRING(1, "led");
+    name = UA_QUALIFIEDNAME(1, "led");
+    UA_Server_addVariableNode(server, nodeId, parentNodeId,
+                              parentReferenceNodeId, name,
+                              variableTypeNodeId, attr, NULL, NULL);
+
+    UA_ValueCallback ledCallback;
+    ledCallback.onRead = beforeReadLed;
+    ledCallback.onWrite = afterWriteLed;
+    UA_Server_setVariableNode_valueCallback(server, nodeId, ledCallback);
+
+    configLed();
+
+    //Add blink method
+#ifdef UA_ENABLE_METHODCALLS
+    UA_Argument inputArguments;
+    UA_Argument_init(&inputArguments);
+    inputArguments.dataType = UA_TYPES[UA_TYPES_INT32].typeId;
+    inputArguments.description = UA_LOCALIZEDTEXT("en-US", "Number of blinks");
+    inputArguments.name = UA_STRING("Blinks");
+    inputArguments.valueRank = UA_VALUERANK_SCALAR; /* scalar argument */
+
+    UA_Argument outputArguments;
+    UA_Argument_init(&outputArguments);
+    outputArguments.arrayDimensionsSize = 0;
+    outputArguments.arrayDimensions = NULL;
+    outputArguments.dataType = UA_TYPES[UA_TYPES_STRING].typeId;
+    outputArguments.description = UA_LOCALIZEDTEXT("en-US", "Status return");
+    outputArguments.name = UA_STRING("Status");
+    outputArguments.valueRank = UA_VALUERANK_SCALAR;
+
+    UA_MethodAttributes addmethodattributes = UA_MethodAttributes_default;
+    addmethodattributes.displayName = UA_LOCALIZEDTEXT("en-US", "Blink");
+    addmethodattributes.executable = true;
+    addmethodattributes.userExecutable = true;
+    UA_Server_addMethodNode(server, UA_NODEID_NUMERIC(1, 62541),
+                            UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER),
+                            UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
+                            UA_QUALIFIEDNAME(1, "blink"), addmethodattributes,
+                            &blink, /* callback of the method node */
+                            1, &inputArguments, 1, &outputArguments, NULL, NULL);
+#endif
 }
 
 static UA_StatusCode
