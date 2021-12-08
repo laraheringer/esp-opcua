@@ -227,34 +227,6 @@ UA_ServerConfig_setUriName(UA_ServerConfig *uaServerConfig, const char *uri, con
     return UA_STATUSCODE_GOOD;
 }
 
-static UA_ByteString
-loadFile(const char *const path) {
-    UA_ByteString fileContents = UA_STRING_NULL;
-
-    /* Open the file */
-    FILE *fp = fopen(path, "rb");
-    if(!fp) {
-        errno = 0; /* We read errno also from the tcp layer... */
-        return fileContents;
-    }
-
-    /* Get the file length, allocate the data and read */
-    fseek(fp, 0, SEEK_END);
-    fileContents.length = (size_t)ftell(fp);
-    fileContents.data = (UA_Byte *)UA_malloc(fileContents.length * sizeof(UA_Byte));
-    if(fileContents.data) {
-        fseek(fp, 0, SEEK_SET);
-        size_t read = fread(fileContents.data, sizeof(UA_Byte), fileContents.length, fp);
-        if(read != fileContents.length)
-            UA_ByteString_clear(&fileContents);
-    } else {
-        fileContents.length = 0;
-    }
-    fclose(fp);
-
-    return fileContents;
-}
-
 static void initSPIFFS(const char* basePath) {
     ESP_LOGI(TAG, "Initializing SPIFFS");
 
@@ -292,7 +264,7 @@ static void clearSPIFFS() {
     ESP_LOGI(TAG, "SPIFFS unmounted");
 }
 
-static void testSPIFFS(const char * fileName) {
+static UA_ByteString loadFile(const char * fileName) {
     const char* basePath = "/spiffs";
     char fullPath[128];
     strncpy(fullPath, basePath, sizeof(fullPath));
@@ -301,29 +273,32 @@ static void testSPIFFS(const char * fileName) {
 
     initSPIFFS(basePath);
     
-    ESP_LOGI(TAG, "Reading %s", fileName);
-    // Open for reading hello.txt
-    FILE* f = fopen(fullPath, "r");
-    if (f == NULL) {
+    UA_ByteString fileContents = UA_STRING_NULL;
+
+    FILE *fp = fopen(fullPath, "rb");
+    if(!fp) {
         ESP_LOGE(TAG, "Failed to open %s", fullPath);
-        return;
+        return fileContents;
     }
 
-    char buf[64];
-    memset(buf, 0, sizeof(buf));
-    fread(buf, 1, sizeof(buf), f);
-    fclose(f);
-
-    // Display the read contents from the file
-    ESP_LOGI(TAG, "Read from %s: %s", fileName, buf);
+    fseek(fp, 0, SEEK_END);
+    fileContents.length = (size_t)ftell(fp);
+    fileContents.data = (UA_Byte *)UA_malloc(fileContents.length * sizeof(UA_Byte));
+    if(fileContents.data) {
+        fseek(fp, 0, SEEK_SET);
+        size_t read = fread(fileContents.data, sizeof(UA_Byte), fileContents.length, fp);
+        if(read != fileContents.length)
+            UA_ByteString_clear(&fileContents);
+    } else {
+        fileContents.length = 0;
+    }
+    fclose(fp);
     
     clearSPIFFS();
+    return fileContents;
 }
 
 static void opcua_task(void *arg) {
-
-    testSPIFFS("text.txt");
-
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
 
     //The default 64KB of memory for sending and receicing buffer caused problems to many users. With the code below, they are reduced to ~16KB
@@ -332,14 +307,14 @@ static void opcua_task(void *arg) {
 
     ESP_LOGI(TAG_OPC, "Initializing OPC UA. Free Heap: %d bytes", xPortGetFreeHeapSize());
 
-    UA_ByteString certificate = loadFile("D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\open62541-1.2.2\\tools\\certs\\server_cert.der");
+    UA_ByteString certificate = loadFile("server_cert.der");
     if(certificate.length == 0) {
-        UA_LOG_FATAL(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server certificate.");
+        UA_LOG_ERROR(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server certificate.");
     }
 
-    UA_ByteString privateKey = loadFile("D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\open62541-1.2.2\\tools\\certs\\server_key.der");
+    UA_ByteString privateKey = loadFile("server_key.der");
     if(privateKey.length == 0) {
-        UA_LOG_FATAL(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server private key.der.");
+        UA_LOG_ERROR(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server private key.der.");
     }
 
     UA_Server *server = UA_Server_new();
@@ -362,7 +337,7 @@ static void opcua_task(void *arg) {
         return;
     }
 
-    const char* appUri = "open62541.esp32.demo";
+    const char* appUri = "urn:open62541.server.application";
     config->mdnsEnabled = true;
     config->mdnsConfig.mdnsServerName = UA_String_fromChars(appUri);
     config->mdnsConfig.serverCapabilitiesSize = 2;
