@@ -1,7 +1,9 @@
 
 idf_component_register(SRCS "main.c"
                        PRIV_INCLUDE_DIRS ${IDF_PATH}/components/freertos/include/freertos
-                       REQUIRES open62541 ethernet_helper nvs_flash esp_adc_cal)
+                       REQUIRES open62541 ethernet_helper nvs_flash esp_adc_cal spiffs)
+
+spiffs_create_partition_image(spiffs ../data FLASH_IN_PROJECT)
 
 # Build static library, do not build test executables
 option(BUILD_SHARED_LIBS OFF)

@@ -12,6 +12,7 @@
 #include <esp_system.h>
 #include <sys/param.h>
 #include <nvs_flash.h>
+#include "esp_spiffs.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -226,7 +227,102 @@ UA_ServerConfig_setUriName(UA_ServerConfig *uaServerConfig, const char *uri, con
     return UA_STATUSCODE_GOOD;
 }
 
+static UA_ByteString
+loadFile(const char *const path) {
+    UA_ByteString fileContents = UA_STRING_NULL;
+
+    /* Open the file */
+    FILE *fp = fopen(path, "rb");
+    if(!fp) {
+        errno = 0; /* We read errno also from the tcp layer... */
+        return fileContents;
+    }
+
+    /* Get the file length, allocate the data and read */
+    fseek(fp, 0, SEEK_END);
+    fileContents.length = (size_t)ftell(fp);
+    fileContents.data = (UA_Byte *)UA_malloc(fileContents.length * sizeof(UA_Byte));
+    if(fileContents.data) {
+        fseek(fp, 0, SEEK_SET);
+        size_t read = fread(fileContents.data, sizeof(UA_Byte), fileContents.length, fp);
+        if(read != fileContents.length)
+            UA_ByteString_clear(&fileContents);
+    } else {
+        fileContents.length = 0;
+    }
+    fclose(fp);
+
+    return fileContents;
+}
+
+static void initSPIFFS(const char* basePath) {
+    ESP_LOGI(TAG, "Initializing SPIFFS");
+
+    esp_vfs_spiffs_conf_t conf = {
+      .base_path = basePath,
+      .partition_label = NULL,
+      .max_files = 5,
+      .format_if_mount_failed = false
+    };
+
+    esp_err_t ret = esp_vfs_spiffs_register(&conf);
+
+    if (ret != ESP_OK) {
+        if (ret == ESP_FAIL) {
+            ESP_LOGE(TAG, "Failed to mount or format filesystem");
+        } else if (ret == ESP_ERR_NOT_FOUND) {
+            ESP_LOGE(TAG, "Failed to find SPIFFS partition");
+        } else {
+            ESP_LOGE(TAG, "Failed to initialize SPIFFS (%s)", esp_err_to_name(ret));
+        }
+        return;
+    }
+
+    size_t total = 0, used = 0;
+    ret = esp_spiffs_info(NULL, &total, &used);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to get SPIFFS partition information (%s)", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Partition size: total: %d, used: %d", total, used);
+    }
+}
+
+static void clearSPIFFS() {
+    esp_vfs_spiffs_unregister(NULL);
+    ESP_LOGI(TAG, "SPIFFS unmounted");
+}
+
+static void testSPIFFS(const char * fileName) {
+    const char* basePath = "/spiffs";
+    char fullPath[128];
+    strncpy(fullPath, basePath, sizeof(fullPath));
+    strncat(fullPath, "/", 2);
+    strncat(fullPath, fileName, (sizeof(fileName) - strlen(fileName)));
+
+    initSPIFFS(basePath);
+    
+    ESP_LOGI(TAG, "Reading %s", fileName);
+    // Open for reading hello.txt
+    FILE* f = fopen(fullPath, "r");
+    if (f == NULL) {
+        ESP_LOGE(TAG, "Failed to open %s", fullPath);
+        return;
+    }
+
+    char buf[64];
+    memset(buf, 0, sizeof(buf));
+    fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+
+    // Display the read contents from the file
+    ESP_LOGI(TAG, "Read from %s: %s", fileName, buf);
+    
+    clearSPIFFS();
+}
+
 static void opcua_task(void *arg) {
+
+    testSPIFFS("text.txt");
 
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
 
@@ -236,12 +332,35 @@ static void opcua_task(void *arg) {
 
     ESP_LOGI(TAG_OPC, "Initializing OPC UA. Free Heap: %d bytes", xPortGetFreeHeapSize());
 
+    UA_ByteString certificate = loadFile("D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\open62541-1.2.2\\tools\\certs\\server_cert.der");
+    if(certificate.length == 0) {
+        UA_LOG_FATAL(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server certificate.");
+    }
+
+    UA_ByteString privateKey = loadFile("D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\open62541-1.2.2\\tools\\certs\\server_key.der");
+    if(privateKey.length == 0) {
+        UA_LOG_FATAL(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server private key.der.");
+    }
 
     UA_Server *server = UA_Server_new();
 
     UA_ServerConfig *config = UA_Server_getConfig(server);
 
-    UA_ServerConfig_setMinimalCustomBuffer(config, 4840, 0, sendBufferSize, recvBufferSize);
+    UA_StatusCode res;
+    if(certificate.length == 0 || privateKey.length == 0) {
+        res = UA_ServerConfig_setMinimalCustomBuffer(config, 4840, 0, sendBufferSize, recvBufferSize);
+    } else {
+        res = UA_ServerConfig_setDefaultWithSecurityPolicies(config, 4840, &certificate, &privateKey, NULL, 0, NULL, 0, NULL, 0);
+    }
+            
+    if(res != UA_STATUSCODE_GOOD) {
+        UA_ServerConfig_clean(config);
+
+        UA_ByteString_clear(&certificate);
+        UA_ByteString_clear(&privateKey);
+
+        return;
+    }
 
     const char* appUri = "open62541.esp32.demo";
     config->mdnsEnabled = true;
