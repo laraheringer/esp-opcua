@@ -289,6 +289,41 @@ static UA_ByteString loadFile(const char * filePath) {
     return fileContents;
 }
 
+static void addSecurityPolicy(UA_ServerConfig *config, const UA_ByteString *certificate, const UA_ByteString *privateKey) {
+    UA_StatusCode retval = UA_ServerConfig_addSecurityPolicyBasic128Rsa15(config, certificate, privateKey);
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_LOG_WARNING(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                       "Could not add SecurityPolicy#Basic128Rsa15 with error code %s",
+                       UA_StatusCode_name(retval));
+        return;
+    }
+
+    retval = UA_ServerConfig_addEndpoint(config, UA_BYTESTRING("http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15"),
+                                         UA_MESSAGESECURITYMODE_SIGN);
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_LOG_WARNING(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                       "Could not add endpoint with error code %s",
+                       UA_StatusCode_name(retval));
+        return;
+    }
+}
+
+static void setAcessControl(UA_ServerConfig *config) {
+    static UA_UsernamePasswordLogin logins[2] = {
+        {UA_STRING_STATIC("laraheringer"), UA_STRING_STATIC("lara123sh")},
+        {UA_STRING_STATIC("admin"), UA_STRING_STATIC("root")}
+    };
+    config->accessControl.clear(&config->accessControl);
+    UA_StatusCode retval = UA_AccessControl_default(config, false,
+             &config->securityPolicies[config->securityPoliciesSize-1].policyUri, 2, logins);
+
+    if(retval != UA_STATUSCODE_GOOD) {
+        UA_LOG_WARNING(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                       "Could not set access control with error code %s",
+                       UA_StatusCode_name(retval));
+    }
+}
+
 static void opcua_task(void *arg) {
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
 
@@ -315,10 +350,14 @@ static void opcua_task(void *arg) {
     UA_ServerConfig *config = UA_Server_getConfig(server);
 
     UA_StatusCode res;
-    if(certificate.length == 0 || privateKey.length == 0) {
+    if(certificate.length == 0) {
         res = UA_ServerConfig_setMinimalCustomBuffer(config, 4840, 0, sendBufferSize, recvBufferSize);
     } else {
-        res = UA_ServerConfig_setDefaultWithSecurityPolicies(config, 4840, &certificate, &privateKey, NULL, 0, NULL, 0, NULL, 0);
+        res = UA_ServerConfig_setMinimalCustomBuffer(config, 4840, &certificate, sendBufferSize, recvBufferSize);
+
+        if(privateKey.length != 0 && res == UA_STATUSCODE_GOOD) {
+            addSecurityPolicy(config, &certificate, &privateKey);
+        }
     }
             
     if(res != UA_STATUSCODE_GOOD) {
@@ -329,6 +368,8 @@ static void opcua_task(void *arg) {
 
         return;
     }
+
+    setAcessControl(config);
 
     const char* appUri = "urn:open62541.server.application";
     config->mdnsEnabled = true;
