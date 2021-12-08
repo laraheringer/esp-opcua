@@ -227,11 +227,11 @@ UA_ServerConfig_setUriName(UA_ServerConfig *uaServerConfig, const char *uri, con
     return UA_STATUSCODE_GOOD;
 }
 
-static void initSPIFFS(const char* basePath) {
+static void initSPIFFS() {
     ESP_LOGI(TAG, "Initializing SPIFFS");
 
     esp_vfs_spiffs_conf_t conf = {
-      .base_path = basePath,
+      .base_path = "/spiffs",
       .partition_label = NULL,
       .max_files = 5,
       .format_if_mount_failed = false
@@ -264,20 +264,12 @@ static void clearSPIFFS() {
     ESP_LOGI(TAG, "SPIFFS unmounted");
 }
 
-static UA_ByteString loadFile(const char * fileName) {
-    const char* basePath = "/spiffs";
-    char fullPath[128];
-    strncpy(fullPath, basePath, sizeof(fullPath));
-    strncat(fullPath, "/", 2);
-    strncat(fullPath, fileName, (sizeof(fileName) - strlen(fileName)));
-
-    initSPIFFS(basePath);
-    
+static UA_ByteString loadFile(const char * filePath) {
     UA_ByteString fileContents = UA_STRING_NULL;
 
-    FILE *fp = fopen(fullPath, "rb");
+    FILE *fp = fopen(filePath, "rb");
     if(!fp) {
-        ESP_LOGE(TAG, "Failed to open %s", fullPath);
+        ESP_LOGE(TAG, "Failed to open %s", filePath);
         return fileContents;
     }
 
@@ -294,7 +286,6 @@ static UA_ByteString loadFile(const char * fileName) {
     }
     fclose(fp);
     
-    clearSPIFFS();
     return fileContents;
 }
 
@@ -307,15 +298,17 @@ static void opcua_task(void *arg) {
 
     ESP_LOGI(TAG_OPC, "Initializing OPC UA. Free Heap: %d bytes", xPortGetFreeHeapSize());
 
-    UA_ByteString certificate = loadFile("server_cert.der");
+    initSPIFFS();
+    UA_ByteString certificate = loadFile("/spiffs/server_cert.der");
     if(certificate.length == 0) {
         UA_LOG_ERROR(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server certificate.");
     }
 
-    UA_ByteString privateKey = loadFile("server_key.der");
+    UA_ByteString privateKey = loadFile("/spiffs/server_key.der");
     if(privateKey.length == 0) {
-        UA_LOG_ERROR(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server private key.der.");
+        UA_LOG_ERROR(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND, "Unable to load file server private key.");
     }
+    clearSPIFFS();
 
     UA_Server *server = UA_Server_new();
 
