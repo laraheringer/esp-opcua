@@ -300,6 +300,9 @@ static void addSecurityPolicy(UA_ServerConfig *config, const UA_ByteString *cert
 
     retval = UA_ServerConfig_addEndpoint(config, UA_BYTESTRING("http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15"),
                                          UA_MESSAGESECURITYMODE_SIGN);
+
+    retval = UA_ServerConfig_addEndpoint(config, UA_BYTESTRING("http://opcfoundation.org/UA/SecurityPolicy#Basic128Rsa15"),
+                                         UA_MESSAGESECURITYMODE_SIGNANDENCRYPT);
     if(retval != UA_STATUSCODE_GOOD) {
         UA_LOG_WARNING(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
                        "Could not add endpoint with error code %s",
@@ -314,7 +317,7 @@ static void setAcessControl(UA_ServerConfig *config) {
         {UA_STRING_STATIC("admin"), UA_STRING_STATIC("root")}
     };
     config->accessControl.clear(&config->accessControl);
-    UA_StatusCode retval = UA_AccessControl_default(config, false,
+    UA_StatusCode retval = UA_AccessControl_default(config, true,
              &config->securityPolicies[config->securityPoliciesSize-1].policyUri, 2, logins);
 
     if(retval != UA_STATUSCODE_GOOD) {
@@ -369,8 +372,6 @@ static void opcua_task(void *arg) {
         return;
     }
 
-    setAcessControl(config);
-
     const char* appUri = "urn:open62541.server.application";
     config->mdnsEnabled = true;
     config->mdnsConfig.mdnsServerName = UA_String_fromChars(appUri);
@@ -390,7 +391,7 @@ static void opcua_task(void *arg) {
     } else {
         ESP_LOGI(TAG_OPC, "Could not get default IP Address!");
     }
-    UA_ServerConfig_setUriName(config, appUri, "open62541 ESP32 Demo");
+    UA_ServerConfig_setUriName(config, appUri, "open62541Server");
 
     UA_String str = UA_STRING(CONFIG_ETHERNET_HELPER_STATIC_IP4_ADDRESS);
     UA_String_clear(&config->customHostname);
