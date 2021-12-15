@@ -13,6 +13,8 @@
 #include <sys/param.h>
 #include <nvs_flash.h>
 #include "esp_spiffs.h"
+#include "driver/adc.h"
+#include "esp_adc_cal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +44,7 @@
 #include <esp_sntp.h>
 
 #define LED_GPIO 5
+#define POT_ADC ADC1_CHANNEL_6
 
 static const char *TAG = "MAIN";
 static const char *TAG_OPC = "OPC UA";
@@ -108,6 +111,25 @@ static void configLed() {
     gpio_set_direction(LED_GPIO, GPIO_MODE_INPUT_OUTPUT);
 }
 
+static void
+beforeReadPot(UA_Server *server,
+               const UA_NodeId *sessionId, void *sessionContext,
+               const UA_NodeId *nodeid, void *nodeContext,
+               const UA_NumericRange *range, const UA_DataValue *data) {
+    UA_Int32 readADC = adc1_get_raw(POT_ADC);
+    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                "Reading variable pot = %d", readADC);
+    UA_Variant value;
+    UA_Variant_setScalar(&value, &readADC, &UA_TYPES[UA_TYPES_INT32]);
+    UA_NodeId nodeId = UA_NODEID_STRING(1, "pot");
+    UA_Server_writeValue(server, nodeId, value);
+}
+
+static void configPot() {
+    adc1_config_width(ADC_WIDTH_BIT_10);
+    adc1_config_channel_atten(POT_ADC, ADC_ATTEN_DB_0);
+}
+
 static UA_StatusCode
 blink(UA_Server *server,
            const UA_NodeId *sessionId, void *sessionContext,
@@ -170,6 +192,25 @@ addVariables(UA_Server *server) {
     UA_Server_setVariableNode_valueCallback(server, nodeId, ledCallback);
 
     configLed();
+
+    //Add variable pot
+    UA_Int32 pot = 0;
+    attr.displayName = UA_LOCALIZEDTEXT("en-US", "pot");
+    attr.accessLevel = UA_ACCESSLEVELMASK_READ;
+    UA_Variant_setScalar(&attr.value, &pot, &UA_TYPES[UA_TYPES_INT32]);
+
+    nodeId = UA_NODEID_STRING(1, "pot");
+    name = UA_QUALIFIEDNAME(1, "pot");
+    UA_Server_addVariableNode(server, nodeId, parentNodeId,
+                              parentReferenceNodeId, name,
+                              variableTypeNodeId, attr, NULL, NULL);
+
+    UA_ValueCallback potCallback;
+    potCallback.onRead = beforeReadPot;
+    potCallback.onWrite = NULL;
+    UA_Server_setVariableNode_valueCallback(server, nodeId, potCallback);
+
+    configPot();
 
     //Add blink method
 #ifdef UA_ENABLE_METHODCALLS
