@@ -45,6 +45,7 @@
 
 #define LED_GPIO 5
 #define POT_ADC ADC1_CHANNEL_6
+#define TEMP_ADC ADC1_CHANNEL_7
 
 static const char *TAG = "MAIN";
 static const char *TAG_OPC = "OPC UA";
@@ -56,32 +57,6 @@ static bool serverCreated = false;
  * maintains its value when ESP32 wakes from deep sleep.
  */
 RTC_DATA_ATTR static int boot_count = 0;
-
-static void
-updateCountVariable(UA_Server *server) {
-    UA_Int32 count =  rand() % 100;
-    UA_Variant value;
-    UA_Variant_setScalar(&value, &count, &UA_TYPES[UA_TYPES_INT32]);
-    UA_NodeId currentNodeId = UA_NODEID_STRING(1, "count");
-    UA_Server_writeValue(server, currentNodeId, value);
-}
-
-static void
-beforeReadCount(UA_Server *server,
-               const UA_NodeId *sessionId, void *sessionContext,
-               const UA_NodeId *nodeid, void *nodeContext,
-               const UA_NumericRange *range, const UA_DataValue *data) {
-    updateCountVariable(server);
-}
-
-static void
-afterWriteCount(UA_Server *server,
-               const UA_NodeId *sessionId, void *sessionContext,
-               const UA_NodeId *nodeId, void *nodeContext,
-               const UA_NumericRange *range, const UA_DataValue *data) {
-    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
-                "The variable count was updated");
-}
 
 static void
 beforeReadLed(UA_Server *server,
@@ -130,58 +105,50 @@ static void configPot() {
     adc1_config_channel_atten(POT_ADC, ADC_ATTEN_DB_0);
 }
 
-static UA_StatusCode
-blink(UA_Server *server,
-           const UA_NodeId *sessionId, void *sessionContext,
-           const UA_NodeId *methodId, void *methodContext,
-           const UA_NodeId *objectId, void *objectContext,
-           size_t inputSize, const UA_Variant *input,
-           size_t outputSize, UA_Variant *output) {
-    int nBlinks = (int)*(UA_Int32 *)input[0].data;
+static void
+beforeReadTemp(UA_Server *server,
+               const UA_NodeId *sessionId, void *sessionContext,
+               const UA_NodeId *nodeid, void *nodeContext,
+               const UA_NumericRange *range, const UA_DataValue *data) {
+    UA_Int32 readADC = adc1_get_raw(TEMP_ADC);
+    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                "Reading variable temp = %d", readADC);
+    UA_Variant value;
+    UA_Variant_setScalar(&value, &readADC, &UA_TYPES[UA_TYPES_INT32]);
+    UA_NodeId nodeId = UA_NODEID_STRING(1, "temp");
+    UA_Server_writeValue(server, nodeId, value);
+}
 
-    if (nBlinks > 4) return UA_STATUSCODE_BADINVALIDARGUMENT;
-    for(int i = 0; i < nBlinks; i++) {
-        gpio_set_level(LED_GPIO, 1);       
-        vTaskDelay(700 / portTICK_PERIOD_MS);
-        gpio_set_level(LED_GPIO, 0);       
-        vTaskDelay(700 / portTICK_PERIOD_MS);
-    }
-    return UA_STATUSCODE_GOOD;
+static void configTemp() {
+    adc1_config_width(ADC_WIDTH_BIT_10);
+    adc1_config_channel_atten(TEMP_ADC, ADC_ATTEN_DB_0);
+}
+
+static void
+beforeRead(UA_Server *server,
+               const UA_NodeId *sessionId, void *sessionContext,
+               const UA_NodeId *nodeid, void *nodeContext,
+               const UA_NumericRange *range, const UA_DataValue *data) {
+    UA_Int32 randomValue =  rand() % 1000;
+    UA_Variant value;
+    UA_Variant_setScalar(&value, &randomValue, &UA_TYPES[UA_TYPES_INT32]);
+    UA_Server_writeValue(server, *nodeid, value);
 }
 
 static void
 addVariables(UA_Server *server) {
-    //Add variable count
-    UA_Int32 count = 0;
-    UA_VariableAttributes attr = UA_VariableAttributes_default;
-    attr.displayName = UA_LOCALIZEDTEXT("en-US", "count - number of turns");
-    attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
-    UA_Variant_setScalar(&attr.value, &count, &UA_TYPES[UA_TYPES_INT32]);
-
-    UA_NodeId nodeId = UA_NODEID_STRING(1, "count");
-    UA_QualifiedName name = UA_QUALIFIEDNAME(1, "count");
-    UA_NodeId parentNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
-    UA_NodeId parentReferenceNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES);
-    UA_NodeId variableTypeNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE);
-    UA_Server_addVariableNode(server, nodeId, parentNodeId,
-                              parentReferenceNodeId, name,
-                              variableTypeNodeId, attr, NULL, NULL);
-
-    UA_ValueCallback countCallback;
-    countCallback.onRead = beforeReadCount;
-    countCallback.onWrite = afterWriteCount;
-    UA_Server_setVariableNode_valueCallback(server, nodeId, countCallback);
-
-    updateCountVariable(server);
-
     //Add variable led
+    UA_VariableAttributes attr = UA_VariableAttributes_default;
     UA_Boolean led = false;
     attr.displayName = UA_LOCALIZEDTEXT("en-US", "led");
     attr.accessLevel = UA_ACCESSLEVELMASK_READ | UA_ACCESSLEVELMASK_WRITE;
     UA_Variant_setScalar(&attr.value, &led, &UA_TYPES[UA_TYPES_BOOLEAN]);
 
-    nodeId = UA_NODEID_STRING(1, "led");
-    name = UA_QUALIFIEDNAME(1, "led");
+    UA_NodeId nodeId = UA_NODEID_STRING(1, "led");
+    UA_QualifiedName name = UA_QUALIFIEDNAME(1, "led");
+    UA_NodeId parentNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER);
+    UA_NodeId parentReferenceNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_ORGANIZES);
+    UA_NodeId variableTypeNodeId = UA_NODEID_NUMERIC(0, UA_NS0ID_BASEDATAVARIABLETYPE);
     UA_Server_addVariableNode(server, nodeId, parentNodeId,
                               parentReferenceNodeId, name,
                               variableTypeNodeId, attr, NULL, NULL);
@@ -212,35 +179,43 @@ addVariables(UA_Server *server) {
 
     configPot();
 
-    //Add blink method
-#ifdef UA_ENABLE_METHODCALLS
-    UA_Argument inputArguments;
-    UA_Argument_init(&inputArguments);
-    inputArguments.dataType = UA_TYPES[UA_TYPES_INT32].typeId;
-    inputArguments.description = UA_LOCALIZEDTEXT("en-US", "Number of blinks");
-    inputArguments.name = UA_STRING("Blinks");
-    inputArguments.valueRank = UA_VALUERANK_SCALAR; /* scalar argument */
+    //Add variable temp
+    UA_Int32 temp = 0;
+    attr.displayName = UA_LOCALIZEDTEXT("en-US", "temp");
+    attr.accessLevel = UA_ACCESSLEVELMASK_READ;
+    UA_Variant_setScalar(&attr.value, &temp, &UA_TYPES[UA_TYPES_INT32]);
 
-    UA_Argument outputArguments;
-    UA_Argument_init(&outputArguments);
-    outputArguments.arrayDimensionsSize = 0;
-    outputArguments.arrayDimensions = NULL;
-    outputArguments.dataType = UA_TYPES[UA_TYPES_STRING].typeId;
-    outputArguments.description = UA_LOCALIZEDTEXT("en-US", "Status return");
-    outputArguments.name = UA_STRING("Status");
-    outputArguments.valueRank = UA_VALUERANK_SCALAR;
+    nodeId = UA_NODEID_STRING(1, "temp");
+    name = UA_QUALIFIEDNAME(1, "temp");
+    UA_Server_addVariableNode(server, nodeId, parentNodeId,
+                              parentReferenceNodeId, name,
+                              variableTypeNodeId, attr, NULL, NULL);
 
-    UA_MethodAttributes addmethodattributes = UA_MethodAttributes_default;
-    addmethodattributes.displayName = UA_LOCALIZEDTEXT("en-US", "Blink");
-    addmethodattributes.executable = true;
-    addmethodattributes.userExecutable = true;
-    UA_Server_addMethodNode(server, UA_NODEID_NUMERIC(1, 62541),
-                            UA_NODEID_NUMERIC(0, UA_NS0ID_OBJECTSFOLDER),
-                            UA_NODEID_NUMERIC(0, UA_NS0ID_HASCOMPONENT),
-                            UA_QUALIFIEDNAME(1, "blink"), addmethodattributes,
-                            &blink, /* callback of the method node */
-                            1, &inputArguments, 1, &outputArguments, NULL, NULL);
-#endif
+    UA_ValueCallback tempCallback;
+    tempCallback.onRead = beforeReadTemp;
+    tempCallback.onWrite = NULL;
+    UA_Server_setVariableNode_valueCallback(server, nodeId, tempCallback);
+
+    configTemp();
+
+    UA_Int32 var = 0;
+    attr.accessLevel = UA_ACCESSLEVELMASK_READ;
+    UA_Variant_setScalar(&attr.value, &var, &UA_TYPES[UA_TYPES_INT32]);
+    UA_ValueCallback varCallback;
+    varCallback.onRead = beforeRead;
+    varCallback.onWrite = NULL;
+    for (int i = 1; i <= 10; i++) {
+        char nodeName[15];
+        sprintf(nodeName,"var%d", i);
+        attr.displayName = UA_LOCALIZEDTEXT("en-US", nodeName);
+        nodeId = UA_NODEID_STRING(1, nodeName);
+        name = UA_QUALIFIEDNAME(1, nodeName);
+
+        UA_Server_addVariableNode(server, nodeId, parentNodeId,
+                              parentReferenceNodeId, name,
+                              variableTypeNodeId, attr, NULL, NULL);
+        UA_Server_setVariableNode_valueCallback(server, nodeId, varCallback);
+    }
 }
 
 static UA_StatusCode
@@ -350,23 +325,11 @@ static void addSecurityPolicy(UA_ServerConfig *config, const UA_ByteString *cert
                        UA_StatusCode_name(retval));
         return;
     }
+
+    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
+                "Added SecurityPolicy#Basic128Rsa15");
 }
 
-static void setAcessControl(UA_ServerConfig *config) {
-    static UA_UsernamePasswordLogin logins[2] = {
-        {UA_STRING_STATIC("laraheringer"), UA_STRING_STATIC("lara123sh")},
-        {UA_STRING_STATIC("admin"), UA_STRING_STATIC("root")}
-    };
-    config->accessControl.clear(&config->accessControl);
-    UA_StatusCode retval = UA_AccessControl_default(config, true,
-             &config->securityPolicies[config->securityPoliciesSize-1].policyUri, 2, logins);
-
-    if(retval != UA_STATUSCODE_GOOD) {
-        UA_LOG_WARNING(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
-                       "Could not set access control with error code %s",
-                       UA_StatusCode_name(retval));
-    }
-}
 
 static void opcua_task(void *arg) {
     ESP_ERROR_CHECK(esp_task_wdt_add(NULL));
@@ -395,6 +358,7 @@ static void opcua_task(void *arg) {
 
     UA_StatusCode res;
     if(certificate.length == 0) {
+        UA_ServerConfig_setMinimal(config, 4840,0)
         res = UA_ServerConfig_setMinimalCustomBuffer(config, 4840, 0, sendBufferSize, recvBufferSize);
     } else {
         res = UA_ServerConfig_setMinimalCustomBuffer(config, 4840, &certificate, sendBufferSize, recvBufferSize);
@@ -413,26 +377,10 @@ static void opcua_task(void *arg) {
         return;
     }
 
-    const char* appUri = "urn:open62541.server.application";
-    config->mdnsEnabled = true;
-    config->mdnsConfig.mdnsServerName = UA_String_fromChars(appUri);
-    config->mdnsConfig.serverCapabilitiesSize = 2;
-    UA_String *caps = (UA_String *) UA_Array_new(2, &UA_TYPES[UA_TYPES_STRING]);
-    caps[0] = UA_String_fromChars("LDS");
-    caps[1] = UA_String_fromChars("NA");
-    config->mdnsConfig.serverCapabilities = caps;
+    config->maxSessions = 2;
+    config->queueSizeLimits = (UA_UInt32Range) {1, 1};
 
-    // We need to set the default IP address for mDNS since internally it's not able to detect it.
-    tcpip_adapter_ip_info_t default_ip;
-    esp_err_t ret = tcpip_adapter_get_ip_info(TCPIP_ADAPTER_IF_STA, &default_ip);
-    if ((ESP_OK == ret) && (default_ip.ip.addr != INADDR_ANY)) {
-        config->mdnsIpAddressListSize = 1;
-        config->mdnsIpAddressList = (uint32_t *)UA_malloc(sizeof(uint32_t)*config->mdnsIpAddressListSize);
-        memcpy(config->mdnsIpAddressList, &default_ip.ip.addr, sizeof(uint32_t));
-    } else {
-        ESP_LOGI(TAG_OPC, "Could not get default IP Address!");
-    }
-    UA_ServerConfig_setUriName(config, appUri, "open62541Server");
+    UA_ServerConfig_setUriName(config, "urn:esp.server.application", "ESPServer");
 
     UA_String str = UA_STRING(CONFIG_ETHERNET_HELPER_STATIC_IP4_ADDRESS);
     UA_String_clear(&config->customHostname);

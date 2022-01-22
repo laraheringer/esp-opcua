@@ -21,6 +21,7 @@ set(open62541_OPTIONS
     "-DCMAKE_BUILD_TYPE=MinSizeRel"
     "-DUA_ENABLE_AMALGAMATION=ON"
     "-DUA_NAMESPACE_ZERO=MINIMAL"
+    "-DUA_ENABLE_METHODCALLS=OFF"
     "-DUA_ENABLE_DISCOVERY=ON"
     "-DUA_ENABLE_DISCOVERY_MULTICAST=ON"
     "-DUA_ENABLE_TYPEDESCRIPTION=OFF"
@@ -28,10 +29,10 @@ set(open62541_OPTIONS
     "-DUA_LOGLEVEL=200"
     "-DUA_ENABLE_NODESET_COMPILER_DESCRIPTIONS=OFF"
     "-DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}"
-    "-DMBEDTLS_INCLUDE_DIRS=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\include"
-    "-DMBEDTLS_LIBRARY=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
-    "-DMBEDX509_LIBRARY=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
-    "-DMBEDCRYPTO_LIBRARY=D:\\Lara\\Materias\\2021_1\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
+    "-DMBEDTLS_INCLUDE_DIRS=D:\\Lara\\Materias\\2021_2\\PFC\\Dev\\mbedtls-3.0.0\\include"
+    "-DMBEDTLS_LIBRARY=D:\\Lara\\Materias\\2021_2\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
+    "-DMBEDX509_LIBRARY=D:\\Lara\\Materias\\2021_2\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
+    "-DMBEDCRYPTO_LIBRARY=D:\\Lara\\Materias\\2021_2\\PFC\\Dev\\mbedtls-3.0.0\\build_dir\\library\\Debug"
 )
 
 
