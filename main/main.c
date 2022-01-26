@@ -106,25 +106,6 @@ static void configPot() {
 }
 
 static void
-beforeReadTemp(UA_Server *server,
-               const UA_NodeId *sessionId, void *sessionContext,
-               const UA_NodeId *nodeid, void *nodeContext,
-               const UA_NumericRange *range, const UA_DataValue *data) {
-    UA_Int32 readADC = adc1_get_raw(TEMP_ADC);
-    UA_LOG_INFO(UA_Log_Stdout, UA_LOGCATEGORY_USERLAND,
-                "Reading variable temp = %d", readADC);
-    UA_Variant value;
-    UA_Variant_setScalar(&value, &readADC, &UA_TYPES[UA_TYPES_INT32]);
-    UA_NodeId nodeId = UA_NODEID_STRING(1, "temp");
-    UA_Server_writeValue(server, nodeId, value);
-}
-
-static void configTemp() {
-    adc1_config_width(ADC_WIDTH_BIT_10);
-    adc1_config_channel_atten(TEMP_ADC, ADC_ATTEN_DB_0);
-}
-
-static void
 beforeRead(UA_Server *server,
                const UA_NodeId *sessionId, void *sessionContext,
                const UA_NodeId *nodeid, void *nodeContext,
@@ -178,25 +159,6 @@ addVariables(UA_Server *server) {
     UA_Server_setVariableNode_valueCallback(server, nodeId, potCallback);
 
     configPot();
-
-    //Add variable temp
-    UA_Int32 temp = 0;
-    attr.displayName = UA_LOCALIZEDTEXT("en-US", "temp");
-    attr.accessLevel = UA_ACCESSLEVELMASK_READ;
-    UA_Variant_setScalar(&attr.value, &temp, &UA_TYPES[UA_TYPES_INT32]);
-
-    nodeId = UA_NODEID_STRING(1, "temp");
-    name = UA_QUALIFIEDNAME(1, "temp");
-    UA_Server_addVariableNode(server, nodeId, parentNodeId,
-                              parentReferenceNodeId, name,
-                              variableTypeNodeId, attr, NULL, NULL);
-
-    UA_ValueCallback tempCallback;
-    tempCallback.onRead = beforeReadTemp;
-    tempCallback.onWrite = NULL;
-    UA_Server_setVariableNode_valueCallback(server, nodeId, tempCallback);
-
-    configTemp();
 
     UA_Int32 var = 0;
     attr.accessLevel = UA_ACCESSLEVELMASK_READ;
@@ -358,7 +320,6 @@ static void opcua_task(void *arg) {
 
     UA_StatusCode res;
     if(certificate.length == 0) {
-        UA_ServerConfig_setMinimal(config, 4840,0)
         res = UA_ServerConfig_setMinimalCustomBuffer(config, 4840, 0, sendBufferSize, recvBufferSize);
     } else {
         res = UA_ServerConfig_setMinimalCustomBuffer(config, 4840, &certificate, sendBufferSize, recvBufferSize);
@@ -378,7 +339,10 @@ static void opcua_task(void *arg) {
     }
 
     config->maxSessions = 2;
+    config->maxMonitoredItemsPerSubscription = 2;
     config->queueSizeLimits = (UA_UInt32Range) {1, 1};
+    config->publishingIntervalLimits = (UA_DurationRange) {10.0, 3600.0 * 1000.0};
+    config->samplingIntervalLimits = (UA_DurationRange) {10.0, 24.0 * 3600.0 * 1000.0};
 
     UA_ServerConfig_setUriName(config, "urn:esp.server.application", "ESPServer");
 
